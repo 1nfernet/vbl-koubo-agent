@@ -1,31 +1,70 @@
 """
 VBL 口播 Agent 命令行端到端入口 (CLI Entry)
-串联 HKR 黄金钩子选择 -> 结构化正文编排 -> 物理发音过筛 -> 提词器排版
+串联：
+1. 环境能力检查（yt-dlp 等）
+2. 博主语料摄取与清洗 (corpus/raw -> cleaned)
+3. 认知逆向蒸馏 (distiller -> candidate.SKILL.md)
+4. 机器质检闸审查与转正 (review_gate -> SKILL.md)
+5. 端到端口播提词生成与确定性归档 (output/<YYYY-MM-DD>_<slug>/)
 """
 
 import sys
+import datetime
+import re
 from pathlib import Path
 
 from vbl_koubo.engine.skill_loader import list_available_skills
 from vbl_koubo.pipeline.orchestrator import KouboOrchestrator
+from vbl_koubo.distiller.ingest import ingest_from_text, check_ytdlp_available
+from vbl_koubo.distiller.extractor import distill_blogger_skill
+from vbl_koubo.distiller.review_gate import promote_candidate_to_active
+
+
+def slugify(text: str) -> str:
+    """生成合规的目录 slug"""
+    slug = re.sub(r'[^\w\u4e00-\u9fa5]+', '-', text).strip('-')
+    return slug[:30] or "untitled"
 
 
 def main():
     print("=" * 65)
-    print("🎙️  VBL 口播 Agent | 端到端生成与提词引擎 (vbl-koubo-agent)")
+    print("🎙️  VBL 口播 Agent (vbl-koubo-agent) | 架构与全功能工作流")
     print("=" * 65)
 
-    # 1. 扫描与展示已注册 Skills
+    # 1. 检查环境能力
+    ytdlp_ok = check_ytdlp_available()
+    print(f"\n[1] 运行环境能力体检:")
+    print(f"  • yt-dlp 字幕抽取支持: {'✅ 已就绪 (可无损秒提字幕)' if ytdlp_ok else '⚠️ 未就绪 (支持手动文本录入降级)'}")
+
+    # 2. 演示：博主认知逆向蒸馏闭环 (Distillation Cycle)
+    print(f"\n[2] 演示：博主认知逆向蒸馏闭环 (Distillation Cycle):")
+    blogger = "commercial-master"
+    raw_sample = (
+        "1\n00:00:01,000 --> 00:00:03,000\n很多人做自媒体总以为是文案写不好。\n\n"
+        "2\n00:00:03,500 --> 00:00:06,000\n实际上真正卡住你的是没有搞懂转化路径！\n\n"
+        "3\n00:00:06,500 --> 00:00:10,000\n注意看，先看数据，前3秒完播率只有10%你怎么卖货？先看事实！"
+    )
+    cleaned_path = ingest_from_text(raw_sample, blogger_name=blogger, sample_name="sample1")
+    print(f"  • 原始 SRT 语料已摄取并完成清洗: {cleaned_path}")
+
+    # 执行蒸馏
+    candidate_path = distill_blogger_skill(blogger_name=blogger)
+    print(f"  • 已逆向提取该博主认知契约: {candidate_path}")
+
+    # 机器质检闸审核转正
+    success, msg = promote_candidate_to_active(blogger)
+    print(f"  • 机器质检闸审查结果: {msg}")
+
+    # 3. 扫描已生效 Skills
     skills = list_available_skills()
-    print(f"\n[1] 正在加载博主 Skills 库...")
+    print(f"\n[3] 当前已生效的博主 Skills 库:")
     for name, skill in skills.items():
         print(f"  • [{name}] - {skill.description} (作者: {skill.author or '未知'})")
 
-    # 2. 激活 VBL 理性客观风格
+    # 4. 激活 VBL 理性风格执行口播生成
     orchestrator = KouboOrchestrator(skill_name="vbl-rational")
-    print(f"\n[2] 当前激活技能: [{orchestrator.skill.name}]")
+    print(f"\n[4] 激活技能: [{orchestrator.skill.name}]")
 
-    # 3. 模拟输入真实素材
     topic_title = "OpenAI GPT-6 Astra 深度评测"
     topic_facts = (
         "OpenAI 发布 GPT-6 Astra，定位为新一代智能模型，主打电脑操作、浏览与专业工程协同。\n"
@@ -34,22 +73,8 @@ def main():
         "API 定价为每百万输入 token 10 美元，每百万输出 token 50 美元，快速模式按标准价 2 倍计费。"
     )
 
-    print(f"\n[3] 待处理素材与事实输入：")
-    print("-" * 55)
-    print(topic_facts)
-    print("-" * 55)
-
-    # 4. 生成 HKR 黄金 3 秒钩子候选
-    print("\n[4] 黄金 3 秒钩子引擎正在竞合生成 (HKR 坐标系)...")
     hooks = orchestrator.generate_hooks(topic_facts)
-    for idx, h in enumerate(hooks, 1):
-        print(f"  👉 钩子 {idx} [{h.type}型 · {h.label}]:")
-        print(f"     文案: \"{h.text}\"")
-        print(f"     意图: {h.rationale}")
-
-    # 5. 选定第 2 个 Hook（硬核证据型）并生成正文
-    selected_hook = hooks[1].text
-    print(f"\n[5] 选定高转化开场: \"{selected_hook}\"")
+    selected_hook = hooks[1].text  # 选定硬核证据型
 
     body_draft = (
         "这里是 VBL。官方页面给出的测试结果很具体：OSWorld 2.0 得分 72.6%，"
@@ -59,22 +84,33 @@ def main():
         "先看页面证据，再决定它适不适合你的工作流。"
     )
 
-    # 6. 物理层安全网过筛与提词器交付
     script = orchestrator.build_teleprompter_script(
         title=topic_title,
         selected_hook=selected_hook,
         body_text=body_draft
     )
 
+    # 5. 确定性输出归档规范：output/<YYYY-MM-DD>_<slug>/
+    today_str = datetime.date.today().isoformat()
+    folder_slug = f"{today_str}_{slugify(topic_title)}"
+    out_dir = Path("output") / folder_slug
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    tele_file = out_dir / "teleprompter.txt"
+    vo_file = out_dir / "vo-final.txt"
+
+    tele_file.write_text(script.teleprompter_text, encoding="utf-8")
+    vo_file.write_text(script.clean_voice_text, encoding="utf-8")
+
     print("\n" + "=" * 65)
     print(script.teleprompter_text)
     print("=" * 65)
 
-    print(f"\n✅ 交付完成！")
-    print(f"   • 有效口播字数: {script.total_words} 字")
-    print(f"   • 精准预计时长: {script.total_estimated_seconds} 秒")
-    print(f"   • 数字汉化率: 100% (如 72.6% -> 百分之七十二点六, 10美元 -> 十美元)")
-    print(f"   • 气口切分段数: {len(script.segments)} 段 (单句 <= 18 字，杜绝嘴瓢)")
+    print(f"\n✅ 交付与归档完成！")
+    print(f"   • 规范归档目录: {out_dir}")
+    print(f"   • 提词器交付文件: {tele_file}")
+    print(f"   • 纯净口播稿 (vo-final.txt): {vo_file}")
+    print(f"   • 字数/预计耗时: {script.total_words} 字 / {script.total_estimated_seconds} 秒")
 
 
 if __name__ == "__main__":

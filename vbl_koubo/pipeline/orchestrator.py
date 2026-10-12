@@ -128,10 +128,16 @@ class KouboOrchestrator:
 
         total_words, total_seconds = calculate_spoken_metrics(spoken_text, wpm=250)
 
-        # 格式化提词器文本
+        # 格式化提词器文本（包含轻量可复现 Manifest）
+        import datetime
+        timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         teleprompter_lines = [
+            f"/* RUN MANIFEST */",
+            f"/* Generated: {timestamp_str} | Skill: {self.skill.name} v{self.skill.version} */",
+            f"/* Standard WPM: 250 | Segments: {len(segments)} */\n",
             f"🎙️ 【{title}】 | 风格：{self.skill.name}",
-            f"⏱️ 预计总长：{total_seconds} 秒 | 总字数：{total_words} 字 (参考语速: 250字/分)\n",
+            f"⏱️ 预计总长：{total_seconds} 秒 | 总字数：{total_words} 字\n",
             "──────────────────────────────────────────"
         ]
         for seg in segments:
