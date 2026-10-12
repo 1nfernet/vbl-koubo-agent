@@ -113,12 +113,15 @@ def clean_spoken_punctuation(text: str) -> str:
     剔除适合眼睛看但不适合口播的符号：
     冒号、分号、中文破折号、括号替换为逗号或空格气口
     注意：保护英文字词中的连字符（如 ScreenSpot-Pro, Terminal-Bench）
+    并自动去除中文词与量词之间多余的空格（如 十 美元 -> 十美元）
     """
     text = re.sub(r'[\(\)（）]', '', text)
     # 将中文全角冒号、分号、破折号转为逗号
     text = re.sub(r'[:：;；——_]', '，', text)
     # 仅将两边有空格或中文的英文破折号替换，不破坏专有名词英文连字符
     text = re.sub(r'(?<=[\u4e00-\u9fa5\s])-(?=[\u4e00-\u9fa5\s])', '，', text)
+    # 去除中文字符之间的多余空格（如 '十 美元' -> '十美元'）
+    text = re.sub(r'(?<=[\u4e00-\u9fa5])\s+(?=[\u4e00-\u9fa5])', '', text)
     # 合并多余标点
     text = re.sub(r'，+', '，', text)
     text = re.sub(r'。+', '。', text)
