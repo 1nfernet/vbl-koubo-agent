@@ -33,6 +33,15 @@ class TestPipeline(unittest.TestCase):
         self.assertIn("K", types)
         self.assertIn("R", types)
 
+    def test_extract_json_from_markdown_fence(self):
+        # 测试防崩溃提取：带 markdown ```json 围栏的大模型返回
+        from vbl_koubo.pipeline.orchestrator import extract_json_from_response
+        wrapped_json = "```json\n{\"hooks\": [{\"type\": \"H\", \"label\": \"测试\", \"text\": \"文案\", \"rationale\": \"意图\"}]}\n```"
+        data = extract_json_from_response(wrapped_json)
+        self.assertIsNotNone(data)
+        self.assertIn("hooks", data)
+        self.assertEqual(data["hooks"][0]["type"], "H")
+
     def test_orchestrator_build_teleprompter(self):
         orch = KouboOrchestrator(skill_name="vbl-rational")
         hook = "这里是VBL。先看一组确凿证据。"

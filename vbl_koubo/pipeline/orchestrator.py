@@ -4,6 +4,7 @@
 """
 
 import os
+import re
 import json
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
@@ -18,6 +19,32 @@ from vbl_koubo.engine.normalizer import (
 from vbl_koubo.engine.schemas import TeleprompterScript, ScriptSegment
 from vbl_koubo.pipeline.prompts import build_hkr_hook_prompt, build_script_body_prompt
 from vbl_koubo.pipeline.checker import run_quality_gate, QualityCheckResult
+
+
+def extract_json_from_response(raw_text: str) -> Optional[Dict[str, Any]]:
+    """
+    防御性解析大模型返回的 JSON：
+    能自动剔除外层的 ```json ... ``` 或 ``` ... ``` Markdown 围栏，
+    并提取出内部的合法 JSON 对象
+    """
+    cleaned = raw_text.strip()
+    # 剥离 markdown 代码围栏
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r'^```[a-zA-Z]*\n', '', cleaned)
+        cleaned = re.sub(r'\n```$', '', cleaned)
+        cleaned = cleaned.strip()
+
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        # 如果依然失败，尝试用正则找到最外层的 { ... }
+        match = re.search(r'(\{[\s\S]*\})', cleaned)
+        if match:
+            try:
+                return json.loads(match.group(1))
+            except Exception:
+                pass
+    return None
 
 
 @dataclass
@@ -42,9 +69,8 @@ class KouboOrchestrator:
         if llm_callable:
             prompt = build_hkr_hook_prompt(self.skill, facts)
             raw_response = llm_callable(prompt)
-            try:
-                # 尝试解析 JSON
-                data = json.loads(raw_response.strip())
+            data = extract_json_from_response(raw_response)
+            if data and "hooks" in data:
                 hooks = []
                 for item in data.get("hooks", []):
                     hooks.append(HookCandidate(
@@ -55,8 +81,6 @@ class KouboOrchestrator:
                     ))
                 if hooks:
                     return hooks
-            except Exception:
-                pass
 
         # 降级 / 确定性基线生成
         title_snippet = facts.split("\n")[0][:20].strip("# ")
