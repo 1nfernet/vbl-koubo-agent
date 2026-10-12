@@ -88,15 +88,16 @@ def normalize_decimal(text: str) -> str:
 
 
 def normalize_integers(text: str) -> str:
-    """转换整数（单独出现的数字）"""
+    """转换整数（不仅支持 ASCII 词边界，还支持紧挨着中文字符的数字，如 4090显卡、带来3个优势）"""
     def _replace_int(match):
         num_str = match.group(0)
-        # 4位数字如果是年份（如 2026年），逐字读
+        # 4位年份或型号逐字读（如 2026 -> 二零二六，4090 -> 四零九零）
         if len(num_str) == 4:
             return ''.join(DIGIT_MAP.get(c, c) for c in num_str)
         return _int_to_chinese(num_str)
 
-    pattern = r'\b\d+\b'
+    # 匹配不与英文字母或其它数字相连的独立连续数字序列
+    pattern = r'(?<![a-zA-Z0-9])\d+(?![a-zA-Z0-9])'
     return re.sub(pattern, _replace_int, text)
 
 

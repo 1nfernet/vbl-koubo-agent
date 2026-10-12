@@ -33,6 +33,9 @@ class TestVBLKouboCore(unittest.TestCase):
         # 测试整数
         res_int = normalize_numbers("输出 50 美元")
         self.assertIn("五十", res_int)
+        # 测试紧跟中文的数字转换与型号年份
+        self.assertIn("四零九零显卡", normalize_numbers("搭载 4090显卡"))
+        self.assertIn("带来三个优势", normalize_numbers("带来3个优势"))
 
     def test_clean_spoken_punctuation(self):
         raw = "关键指标如下：准确率（综合）达到 90%；不仅如此——还有新特性。"
