@@ -99,6 +99,29 @@ author: 测试
             active_file = skills_dir / "tech-tester" / "SKILL.md"
             self.assertTrue(active_file.exists())
 
+    def test_package_skill_exporter(self):
+        # 测试将指定 skill 打包为独立可分发单包的能力
+        from vbl_koubo.distiller.packager import package_skill
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            mock_skills = tmp_path / "skills"
+            mock_dist = tmp_path / "dist"
+            
+            # 创建模拟合法 skill
+            s_dir = mock_skills / "demo-skill"
+            s_dir.mkdir(parents=True)
+            (s_dir / "SKILL.md").write_text("---\nname: demo-skill\ndescription: demo\n---\n# Demo\n", encoding="utf-8")
+
+            # 导出为独立目录
+            ok, msg = package_skill("demo-skill", skills_dir=mock_skills, output_dir=mock_dist, as_zip=False)
+            self.assertTrue(ok)
+            self.assertTrue((mock_dist / "demo-skill" / "SKILL.md").exists())
+
+            # 导出为 Zip
+            ok_zip, msg_zip = package_skill("demo-skill", skills_dir=mock_skills, output_dir=mock_dist, as_zip=True)
+            self.assertTrue(ok_zip)
+            self.assertTrue((mock_dist / "demo-skill.zip").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
