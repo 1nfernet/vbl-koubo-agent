@@ -105,6 +105,51 @@ class KouboOrchestrator:
             )
         ]
 
+    def generate_body(
+        self,
+        facts: str,
+        selected_hook: str,
+        llm_callable=None,
+        max_retries: int = 2
+    ) -> str:
+        """
+        根据选定的 Hook 和事实材料，生成符合母结构的正文
+        具备质检重试闭环 (Refine & Retry)：如果命中 L1 禁词，自动触发改写
+        """
+        if not llm_callable:
+            # 基线降级文案
+            return (
+                f"这里是 VBL。先看官方页面给出的具体证据。"
+                f"在核心测试中，各项指标均有明确数据支撑。"
+                f"但在实际部署与可用性上，也有具体的门槛和成本考量。"
+                f"先看页面证据，再决定它适不适合你的工作流。"
+            )
+
+        prompt = build_script_body_prompt(self.skill, selected_hook, facts)
+        current_prompt = prompt
+
+        for attempt in range(max_retries + 1):
+            raw_body = llm_callable(current_prompt)
+            # 剥离可能带的代码块标记
+            cleaned_body = re.sub(r'^```[a-zA-Z]*\n', '', raw_body.strip())
+            cleaned_body = re.sub(r'\n```$', '', cleaned_body).strip()
+
+            # 运行 L1 质检
+            gate_res = run_quality_gate(cleaned_body)
+            if gate_res.passed or attempt == max_retries:
+                return gate_res.clean_text
+
+            # 违规时，构建轻量 Refine Prompt 请求改写
+            violations_str = "、".join(gate_res.violations)
+            current_prompt = (
+                f"{prompt}\n\n"
+                f"【上一轮生成的文本存在以下违规，请务必剔除并重新改写】：\n"
+                f"发现 AI 套话或禁用连接词：{violations_str}\n"
+                f"请保持口播短句，重新输出纯正文："
+            )
+
+        return raw_body
+
     def build_teleprompter_script(
         self,
         title: str,
@@ -136,10 +181,15 @@ class KouboOrchestrator:
             role = "hook" if idx <= 2 else ("closing" if idx >= len(raw_chunks) - 1 else "evidence")
             c_count, sec = calculate_spoken_metrics(chunk_clean, wpm=250)
             
-            # 为提词器生成视觉加粗（简单将首个关键信息加粗）
+            # 针对提词器生成视觉加粗（主重音只落在关键数据、核心动词或关键指标上，每句最多一处）
             marked = f"{chunk_clean}。" if not chunk.endswith("。") else chunk
-            if "百分之" in chunk_clean or "点" in chunk_clean:
-                marked = f"**{marked}**"
+            
+            # 严格控制重音命中范围：优先加粗百分比、数字或关键对比词
+            emphasis_targets = ["百分之", "点", "提升", "达到", "卡住", "核心区别", "真正"]
+            for target in emphasis_targets:
+                if target in chunk_clean:
+                    marked = f"**{marked}**"
+                    break
 
             segments.append(ScriptSegment(
                 segment_index=idx,

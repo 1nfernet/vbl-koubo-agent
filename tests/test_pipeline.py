@@ -54,6 +54,22 @@ class TestPipeline(unittest.TestCase):
         self.assertGreater(script.total_estimated_seconds, 5.0)
         self.assertGreater(len(script.segments), 2)
 
+    def test_orchestrator_generate_body_retry(self):
+        # 模拟包含禁词的生成结果，验证质检重试机制
+        orch = KouboOrchestrator(skill_name="vbl-rational")
+        call_count = 0
+        def fake_llm(prompt):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return "综上所述，这个技术不仅让我们看到了未来，更带来了变化。"
+            return "先看官方事实，新模型降低了百分之五十的延迟。"
+
+        cleaned = orch.generate_body("事实", "开场", llm_callable=fake_llm, max_retries=2)
+        self.assertNotIn("综上所述", cleaned)
+        self.assertIn("百分之五十", cleaned)
+        self.assertEqual(call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,23 +1,25 @@
 """
-VBL 口播 Agent 命令行端到端入口 (CLI Entry)
-串联：
-1. 环境能力检查（yt-dlp 等）
-2. 博主语料摄取与清洗 (corpus/raw -> cleaned)
-3. 认知逆向蒸馏 (distiller -> candidate.SKILL.md)
-4. 机器质检闸审查与转正 (review_gate -> SKILL.md)
-5. 端到端口播提词生成与确定性归档 (output/<YYYY-MM-DD>_<slug>/)
+VBL 口播 Agent 命令行实用工具入口 (CLI)
+用法：
+  1. 默认演示模式：
+     python3 run.py
+  2. 真实生成口播稿：
+     python3 run.py --input "你的事实材料或要点" --title "视频主题"
+  3. 从文件读取素材生成：
+     python3 run.py --file path/to/facts.txt --title "视频主题"
+  4. 指定技能风格：
+     python3 run.py --skill vbl-rational --input "..."
 """
 
 import sys
+import argparse
 import datetime
 import re
 from pathlib import Path
 
 from vbl_koubo.engine.skill_loader import list_available_skills
+from vbl_koubo.engine.llm import call_llm, get_llm_config
 from vbl_koubo.pipeline.orchestrator import KouboOrchestrator
-from vbl_koubo.distiller.ingest import ingest_from_text, check_ytdlp_available
-from vbl_koubo.distiller.extractor import distill_blogger_skill
-from vbl_koubo.distiller.review_gate import promote_candidate_to_active
 
 
 def slugify(text: str) -> str:
@@ -27,72 +29,80 @@ def slugify(text: str) -> str:
 
 
 def main():
+    parser = argparse.ArgumentParser(description="VBL 口播 Agent - 结构化口播生成与提词引擎")
+    parser.add_argument("--input", "-i", type=str, help="直接传入事实材料文本")
+    parser.add_argument("--file", "-f", type=str, help="从本地文本文件读取事实材料")
+    parser.add_argument("--title", "-t", type=str, default="口播视频草案", help="视频主题标题")
+    parser.add_argument("--skill", "-s", type=str, default="vbl-rational", help="采用的博主技能 (默认: vbl-rational)")
+    parser.add_argument("--hook-index", type=int, default=1, choices=[1, 2, 3], help="采用第几个黄金 Hook (1: 颠覆型, 2: 证据型, 3: 共鸣型)")
+    parser.add_argument("--mock", action="store_true", help="强制使用规则基线，不调用外部 LLM API")
+
+    args = parser.parse_args()
+
+    # 1. 确定事实输入材料
+    if args.file:
+        file_path = Path(args.file)
+        if not file_path.exists():
+            print(f"❌ 找不到文件: {file_path}")
+            sys.exit(1)
+        facts = file_path.read_text(encoding="utf-8").strip()
+    elif args.input:
+        facts = args.input.strip()
+    else:
+        # 无参数时，优雅跑出默认示例
+        facts = (
+            "OpenAI 发布 GPT-6 Astra，定位为新一代智能模型，主打电脑操作、浏览与专业工程协同。\n"
+            "基准测试得分：OSWorld 2.0 得分 72.6%，ScreenSpot-Pro 达到 92.7%，Terminal-Bench 4.0 为 57.9%。\n"
+            "专业任务方面：AutomationBench 41.4%，BenchCAD 达到 95.9%。\n"
+            "API 定价为每百万输入 token 10 美元，每百万输出 token 50 美元，快速模式按标准价 2 倍计费。"
+        )
+        if args.title == "口播视频草案":
+            args.title = "OpenAI GPT-6 Astra 深度评测"
+
     print("=" * 65)
-    print("🎙️  VBL 口播 Agent (vbl-koubo-agent) | 架构与全功能工作流")
+    print("🎙️  VBL 口播 Agent (vbl-koubo-agent)")
     print("=" * 65)
 
-    # 1. 检查环境能力
-    ytdlp_ok = check_ytdlp_available()
-    print(f"\n[1] 运行环境能力体检:")
-    print(f"  • yt-dlp 字幕抽取支持: {'✅ 已就绪 (可无损秒提字幕)' if ytdlp_ok else '⚠️ 未就绪 (支持手动文本录入降级)'}")
+    # 2. 判断 LLM 是否可用
+    cfg = get_llm_config()
+    use_real_llm = False
+    llm_func = None
 
-    # 2. 演示：博主认知逆向蒸馏闭环 (Distillation Cycle)
-    print(f"\n[2] 演示：博主认知逆向蒸馏闭环 (Distillation Cycle):")
-    blogger = "commercial-master"
-    raw_sample = (
-        "1\n00:00:01,000 --> 00:00:03,000\n很多人做自媒体总以为是文案写不好。\n\n"
-        "2\n00:00:03,500 --> 00:00:06,000\n实际上真正卡住你的是没有搞懂转化路径！\n\n"
-        "3\n00:00:06,500 --> 00:00:10,000\n注意看，先看数据，前3秒完播率只有10%你怎么卖货？先看事实！"
-    )
-    cleaned_path = ingest_from_text(raw_sample, blogger_name=blogger, sample_name="sample1")
-    print(f"  • 原始 SRT 语料已摄取并完成清洗: {cleaned_path}")
+    if not args.mock and cfg["api_key"]:
+        use_real_llm = True
+        llm_func = call_llm
+        print(f"🔗 [在线模式] 检测到 API Key，使用模型: {cfg['model']}")
+    else:
+        print(f"⚙️  [离线/基线模式] 未配置 API Key 或指定了 --mock，采用确定性规则基线")
 
-    # 执行蒸馏
-    candidate_path = distill_blogger_skill(blogger_name=blogger)
-    print(f"  • 已逆向提取该博主认知契约: {candidate_path}")
+    # 3. 初始化编排器
+    orchestrator = KouboOrchestrator(skill_name=args.skill)
+    print(f"📌 采用技能风格: [{orchestrator.skill.name}]")
 
-    # 机器质检闸审核转正
-    success, msg = promote_candidate_to_active(blogger)
-    print(f"  • 机器质检闸审查结果: {msg}")
+    # 4. 生成 3 组黄金 Hook 候选
+    print(f"\n[1] 正在生成 HKR 黄金 3 秒开场...")
+    hooks = orchestrator.generate_hooks(facts, llm_callable=llm_func)
+    for idx, h in enumerate(hooks, 1):
+        star = "★ [已选]" if idx == args.hook_index else "  "
+        print(f"  {star} 钩子 {idx} [{h.type}型 · {h.label}]:")
+        print(f"     \"{h.text}\" ({h.rationale})")
 
-    # 3. 扫描已生效 Skills
-    skills = list_available_skills()
-    print(f"\n[3] 当前已生效的博主 Skills 库:")
-    for name, skill in skills.items():
-        print(f"  • [{name}] - {skill.description} (作者: {skill.author or '未知'})")
+    selected_hook = hooks[args.hook_index - 1].text
 
-    # 4. 激活 VBL 理性风格执行口播生成
-    orchestrator = KouboOrchestrator(skill_name="vbl-rational")
-    print(f"\n[4] 激活技能: [{orchestrator.skill.name}]")
+    # 5. 生成母结构正文（带质检闭环）
+    print(f"\n[2] 正在编排正文结构并执行去 AI 味质检...")
+    body_text = orchestrator.generate_body(facts, selected_hook, llm_callable=llm_func)
 
-    topic_title = "OpenAI GPT-6 Astra 深度评测"
-    topic_facts = (
-        "OpenAI 发布 GPT-6 Astra，定位为新一代智能模型，主打电脑操作、浏览与专业工程协同。\n"
-        "基准测试得分：OSWorld 2.0 得分 72.6%，ScreenSpot-Pro 达到 92.7%，Terminal-Bench 4.0 为 57.9%。\n"
-        "专业任务方面：AutomationBench 41.4%，BenchCAD 达到 95.9%。\n"
-        "API 定价为每百万输入 token 10 美元，每百万输出 token 50 美元，快速模式按标准价 2 倍计费。"
-    )
-
-    hooks = orchestrator.generate_hooks(topic_facts)
-    selected_hook = hooks[1].text  # 选定硬核证据型
-
-    body_draft = (
-        "这里是 VBL。官方页面给出的测试结果很具体：OSWorld 2.0 得分 72.6%，"
-        "ScreenSpot-Pro 达到 92.7%，Terminal-Bench 4.0 为 57.9%。"
-        "在专业任务上，AutomationBench 41.4%，BenchCAD 达到 95.9%。"
-        "页面写明，API 标准价是每百万输入 token 10 美元、输出 50 美元；快速模式按 2 倍计费。"
-        "先看页面证据，再决定它适不适合你的工作流。"
-    )
-
+    # 6. 物理层安全网转换与提词排版
     script = orchestrator.build_teleprompter_script(
-        title=topic_title,
+        title=args.title,
         selected_hook=selected_hook,
-        body_text=body_draft
+        body_text=body_text
     )
 
-    # 5. 确定性输出归档规范：output/<YYYY-MM-DD>_<slug>/
+    # 7. 规范归档
     today_str = datetime.date.today().isoformat()
-    folder_slug = f"{today_str}_{slugify(topic_title)}"
+    folder_slug = f"{today_str}_{slugify(args.title)}"
     out_dir = Path("output") / folder_slug
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -102,15 +112,16 @@ def main():
     tele_file.write_text(script.teleprompter_text, encoding="utf-8")
     vo_file.write_text(script.clean_voice_text, encoding="utf-8")
 
+    # 8. 终端呈现
     print("\n" + "=" * 65)
     print(script.teleprompter_text)
     print("=" * 65)
 
-    print(f"\n✅ 交付与归档完成！")
-    print(f"   • 规范归档目录: {out_dir}")
-    print(f"   • 提词器交付文件: {tele_file}")
-    print(f"   • 纯净口播稿 (vo-final.txt): {vo_file}")
+    print(f"\n✅ 交付完毕！")
+    print(f"   • 存放路径: {out_dir}")
     print(f"   • 字数/预计耗时: {script.total_words} 字 / {script.total_estimated_seconds} 秒")
+    print(f"   • 提词器排版: {tele_file}")
+    print(f"   • 纯净口播稿: {vo_file}")
 
 
 if __name__ == "__main__":

@@ -9,9 +9,13 @@ import json
 import urllib.request
 import urllib.error
 from typing import Dict, Any, Optional
-from dotenv import load_dotenv
 
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # 优雅降级：在未安装 python-dotenv 环境下依然支持原生 os.environ 读取
+    pass
 
 DEFAULT_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
 DEFAULT_BASE_URL = os.getenv("DEEPSEEK_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "https://api.deepseek.com"
