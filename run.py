@@ -35,6 +35,8 @@ def main():
     parser.add_argument("--title", "-t", type=str, default="口播视频草案", help="视频主题标题")
     parser.add_argument("--skill", "-s", type=str, default="vbl-rational", help="采用的博主技能 (默认: vbl-rational)")
     parser.add_argument("--hook-index", type=int, default=1, choices=[1, 2, 3], help="采用第几个黄金 Hook (1: 颠覆型, 2: 证据型, 3: 共鸣型)")
+    parser.add_argument("--mode", "-m", type=str, default="auto", choices=["auto", "create", "polish"], help="生成模式：auto(自动识别), create(要点起草), polish(草稿润色)")
+    parser.add_argument("--duration", "-d", type=int, default=None, help="目标时长（秒，用于 create 模式精确约束字数）")
     parser.add_argument("--mock", action="store_true", help="强制使用规则基线，不调用外部 LLM API")
 
     args = parser.parse_args()
@@ -89,9 +91,15 @@ def main():
 
     selected_hook = hooks[args.hook_index - 1].text
 
-    # 5. 生成母结构正文（带质检闭环）
-    print(f"\n[2] 正在编排正文结构并执行去 AI 味质检...")
-    body_text = orchestrator.generate_body(facts, selected_hook, llm_callable=llm_func)
+    # 5. 生成母结构正文（带质检闭环与动态时长/润色模式）
+    print(f"\n[2] 正在编排正文结构并执行去 AI 味质检 (模式: {args.mode})...")
+    body_text = orchestrator.generate_body(
+        facts,
+        selected_hook,
+        llm_callable=llm_func,
+        mode=args.mode,
+        target_duration=args.duration
+    )
 
     # 6. 物理层安全网转换与提词排版
     script = orchestrator.build_teleprompter_script(

@@ -65,10 +65,24 @@ class TestPipeline(unittest.TestCase):
                 return "综上所述，这个技术不仅让我们看到了未来，更带来了变化。"
             return "先看官方事实，新模型降低了百分之五十的延迟。"
 
-        cleaned = orch.generate_body("事实", "开场", llm_callable=fake_llm, max_retries=2)
+        cleaned = orch.generate_body("事实", "开场", llm_callable=fake_llm, max_retries=2, mode="create")
         self.assertNotIn("综上所述", cleaned)
         self.assertIn("百分之五十", cleaned)
         self.assertEqual(call_count, 2)
+
+    def test_prompt_polish_mode_selection(self):
+        # 测试长草稿输入时自动进入 polish 模式并注入字数区间
+        orch = KouboOrchestrator(skill_name="vbl-rational")
+        captured_prompt = ""
+        def fake_llm(prompt):
+            nonlocal captured_prompt
+            captured_prompt = prompt
+            return "这是润色后的正文。"
+
+        long_text = "这是测试长草稿。" * 50  # 超过 300 字
+        orch.generate_body(long_text, "开场", llm_callable=fake_llm, mode="auto")
+        self.assertIn("最高铁律：严禁删减原稿核心论据与结构", captured_prompt)
+        self.assertIn("成稿字数区间严格控制在", captured_prompt)
 
 
 if __name__ == "__main__":

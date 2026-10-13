@@ -110,11 +110,14 @@ class KouboOrchestrator:
         facts: str,
         selected_hook: str,
         llm_callable=None,
+        mode: str = "auto",
+        target_duration: Optional[int] = None,
         max_retries: int = 2
     ) -> str:
         """
-        根据选定的 Hook 和事实材料，生成符合母结构的正文
-        具备质检重试闭环 (Refine & Retry)：如果命中 L1 禁词，自动触发改写
+        生成或润色正文
+        支持 mode='auto' | 'create' | 'polish'
+        根据目标时长或原文字数动态计算字数预算，解耦硬编码限制
         """
         if not llm_callable:
             # 基线降级文案
@@ -125,7 +128,38 @@ class KouboOrchestrator:
                 f"先看页面证据，再决定它适不适合你的工作流。"
             )
 
-        prompt = build_script_body_prompt(self.skill, selected_hook, facts)
+        # 1. 自动判断模式
+        char_count, _ = calculate_spoken_metrics(facts, wpm=250)
+        is_long_draft = char_count >= 300 and ("\n" in facts or "。" in facts)
+        
+        effective_mode = mode
+        if effective_mode == "auto":
+            effective_mode = "polish" if is_long_draft else "create"
+
+        # 2. 动态计算字数目标预算
+        from vbl_koubo.pipeline.prompts import build_script_body_prompt, build_script_polish_prompt
+        
+        if effective_mode == "polish":
+            # 润色模式：字数锚定在原稿的 75% ~ 95%
+            target_min = int(char_count * 0.75)
+            target_max = int(char_count * 0.95)
+            prompt = build_script_polish_prompt(
+                self.skill, selected_hook, facts,
+                target_words_min=target_min,
+                target_words_max=target_max
+            )
+        else:
+            # 起草模式：以目标秒数（默认 60s 或指定）折算 250 WPM
+            dur = target_duration or 60
+            base_words = int(dur * (250 / 60))
+            target_min = int(base_words * 0.85)
+            target_max = int(base_words * 1.15)
+            prompt = build_script_body_prompt(
+                self.skill, selected_hook, facts,
+                target_words_min=target_min,
+                target_words_max=target_max
+            )
+
         current_prompt = prompt
 
         for attempt in range(max_retries + 1):
