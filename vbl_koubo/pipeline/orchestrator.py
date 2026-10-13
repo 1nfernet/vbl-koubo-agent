@@ -160,7 +160,20 @@ class KouboOrchestrator:
         后处理物理层：过筛禁词、数字发音汉化、长句切分、测算时长并组装提词器
         """
         # 1. 质量哨所检查
-        full_raw = f"{selected_hook}\n{body_text}"
+        hook_clean = selected_hook.strip()
+        body_clean = body_text.strip()
+        
+        # 严格去重：若 body 开头已经包含了 hook（完全相同或去标点后相同），不再重复拼接待选 hook
+        def _normalize_cmp(s: str) -> str:
+            return re.sub(r'[\s，。！？、]', '', s)
+
+        norm_hook = _normalize_cmp(hook_clean)
+        norm_body = _normalize_cmp(body_clean)
+
+        if norm_body.startswith(norm_hook):
+            full_raw = body_clean
+        else:
+            full_raw = f"{hook_clean}\n{body_clean}"
         gate_res: QualityCheckResult = run_quality_gate(full_raw)
         clean_base = gate_res.clean_text
 

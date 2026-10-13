@@ -8,14 +8,31 @@ import os
 import json
 import urllib.request
 import urllib.error
+from pathlib import Path
 from typing import Dict, Any, Optional
+
+def _load_env_fallback():
+    """手动读取项目根目录 .env 文件，零外部依赖保障配置读取"""
+    env_file = Path(__file__).resolve().parent.parent.parent / ".env"
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip('"').strip("'")
+                if k not in os.environ:
+                    os.environ[k] = v
 
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
-    # 优雅降级：在未安装 python-dotenv 环境下依然支持原生 os.environ 读取
     pass
+
+_load_env_fallback()
 
 DEFAULT_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
 DEFAULT_BASE_URL = os.getenv("DEEPSEEK_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "https://api.deepseek.com"

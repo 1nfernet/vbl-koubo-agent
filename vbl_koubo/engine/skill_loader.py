@@ -38,13 +38,18 @@ def _parse_simple_frontmatter(yaml_text: str) -> Dict[str, Any]:
 
 
 def load_skill_by_name(skill_name: str, skills_dir: Optional[Path] = None) -> BloggerSkill:
-    """按名称加载指定博主 Skill"""
+    """按名称加载指定博主 Skill，优先查找项目内 skills/，若无则查找 ~/.agents/skills/"""
     if skills_dir is None:
         skills_dir = Path(__file__).resolve().parent.parent.parent / "skills"
 
     target_file = skills_dir / skill_name / "SKILL.md"
     if not target_file.exists():
-        raise FileNotFoundError(f"未找到 Skill: {skill_name}，对应文件不存在: {target_file}")
+        # 回退查找系统级目录
+        system_skill = Path.home() / ".agents" / "skills" / skill_name / "SKILL.md"
+        if system_skill.exists():
+            target_file = system_skill
+        else:
+            raise FileNotFoundError(f"未找到 Skill: {skill_name}，对应文件不存在: {target_file}")
 
     raw_text = target_file.read_text(encoding="utf-8")
     
